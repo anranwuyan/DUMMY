@@ -1,0 +1,247 @@
+﻿<?xml version="1.0" encoding="utf-8"?><ManagementPack ContentReadable="true" SchemaVersion="2.0" OriginalSchemaVersion="1.1" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:xsl="http://www.w3.org/1999/XSL/Transform">
+  <Manifest>
+    <Identity>
+      <ID>Custom.CPU.Monitor</ID>
+      <Version>1.0.0.1</Version>
+    </Identity>
+    <Name>Custom CPU Monitor</Name>
+    <References>
+      <Reference Alias="PowerShellMonitoring">
+        <ID>Community.PowerShellMonitoring</ID>
+        <Version>1.0.0.21</Version>
+        <PublicKeyToken>1f2892a40cfc5045</PublicKeyToken>
+      </Reference>
+      <Reference Alias="MicrosoftWindowsLibrary7585011">
+        <ID>Microsoft.Windows.Library</ID>
+        <Version>1.5.8501.1</Version>
+        <PublicKeyToken>31bf3856ad364e35</PublicKeyToken>
+      </Reference>
+      <Reference Alias="SystemLibrary7585011">
+        <ID>System.Library</ID>
+        <Version>1.5.8501.1</Version>
+        <PublicKeyToken>31bf3856ad364e35</PublicKeyToken>
+      </Reference>
+      <Reference Alias="SystemCenter">
+        <ID>Microsoft.SystemCenter.Library</ID>
+        <Version>1.25.10132.0</Version>
+        <PublicKeyToken>31bf3856ad364e35</PublicKeyToken>
+      </Reference>
+      <Reference Alias="Health">
+        <ID>System.Health.Library</ID>
+        <Version>1.0.8447.6</Version>
+        <PublicKeyToken>31bf3856ad364e35</PublicKeyToken>
+      </Reference>
+    </References>
+  </Manifest>
+  <Monitoring>
+    <Monitors>
+      <UnitMonitor ID="UIGeneratedMonitor838991326fb9470cad0acfdadabfba87" Accessibility="Public" Enabled="false" Target="MicrosoftWindowsLibrary7585011!Microsoft.Windows.OperatingSystem" ParentMonitorID="Health!System.Health.PerformanceState" Remotable="true" Priority="Normal" TypeID="PowerShellMonitoring!Community.PowerShellMonitoring.UnitMonitors.PowerShellThreeState" ConfirmDelivery="false">
+        <Category>Custom</Category>
+        <AlertSettings AlertMessage="UIGeneratedMonitor838991326fb9470cad0acfdadabfba87_AlertMessageResourceID">
+          <AlertOnState>Warning</AlertOnState>
+          <AutoResolve>true</AutoResolve>
+          <AlertPriority>Normal</AlertPriority>
+          <AlertSeverity>Error</AlertSeverity>
+          <AlertParameters>
+            <AlertParameter1>$Target/Host/Property[Type="MicrosoftWindowsLibrary7585011!Microsoft.Windows.Computer"]/PrincipalName$</AlertParameter1>
+            <AlertParameter2>$Data/Context/Property[@Name='cpupercentage']$</AlertParameter2>
+            <AlertParameter3>$Data/Context/Property[@Name='TopCpuName']$</AlertParameter3>
+            <AlertParameter4>$Data/Context/Property[@Name='Top_Cpu_Value_Percentage']$</AlertParameter4>
+          </AlertParameters>
+        </AlertSettings>
+        <OperationalStates>
+          <OperationalState ID="UIGeneratedOpStateId17d37897803b47789341f6bf0b4326d7" MonitorTypeStateID="Healthy" HealthState="Success" />
+          <OperationalState ID="UIGeneratedOpStateId74d43dd025b84e0c85a2cb6892c3f40d" MonitorTypeStateID="Warning" HealthState="Warning" />
+          <OperationalState ID="UIGeneratedOpStateIdee89c6faa36a41848634518edde19fba" MonitorTypeStateID="Unhealthy" HealthState="Error" />
+        </OperationalStates>
+        <Configuration>
+          <IntervalSeconds>900</IntervalSeconds>
+          <SyncTime />
+          <ScriptName>MyScript.ps1</ScriptName>
+          <ScriptBody> 
+
+
+ #define the api and propertybag
+
+$api = New-Object -ComObject 'MOM.ScriptAPI'
+
+$PropertyBag=$api.CreatePropertyBag()
+
+
+#to check the in total cpu usage
+
+
+$cpuTime = (Get-Counter '\Processor(_Total)\% Processor Time').CounterSamples.CookedValue
+
+$cpuTime = "{0:N0}" -f $cpuTime 
+
+$Percent = '%'
+$cpuTimePercent = $cpuTime + $Percent
+#$cpuTimePercent
+
+
+#To get the top 1 process name which consuming the most CPU resource 
+
+#$ErrorActionPreference = 'SilentlyContinue'
+
+$Top1Process = Get-Counter  '\Process(*)\% Processor Time'  | Select-Object -ExpandProperty countersamples  | Select-Object -Property instancename, cookedvalue | Sort-Object -Property cookedvalue -Descending | ? {$_.InstanceName -ne '_total' -and $_.InstanceName -ne 'idle' }  |ft InstanceName,@{L='CPU';E={($_.Cookedvalue/100).toString('P')}} -AutoSize | select-object -first 3  
+
+$Top1Process | Out-File "C:\Program Files\Top1Process.txt"
+
+$Top1ProcessOutput = gc "C:\Program Files\Top1Process.txt" |Select-Object -last 1 
+
+$Top1ProcessName = $Top1ProcessOutput  -split ' ' |where {$_.Trim() -ne ''} |Select-Object -first 1
+
+
+
+################################################################
+
+#To check if the top 1 process is a OS process or not
+
+
+$process_path = (get-process $Top1ProcessName |select path).path
+
+
+if ( $process_path -eq $null ) {
+
+
+ $Is_OS_Process = 'No'} 
+
+
+else  {
+
+
+dir $process_path  |fl versioninfo &gt; "C:\Program Files\TempFile.txt"
+$Process_Owner  =  get-content  "C:\Program Files\TempFile.txt"
+
+$Microsoft_String  = "*Microsoft*" 
+
+		if ($Process_Owner -like $Microsoft_String)  {
+
+			$Is_OS_Process = 'Yes'}
+
+
+		else { $Is_OS_Process = 'No' }
+	} 
+
+##################################################################
+#to check the precentage of the top 1 process
+
+$Top1ProcessPercetage = $Top1ProcessOutput  -split ' ' |where {$_.Trim() -ne ''} |Select-Object -last 1
+
+###################################################################
+
+
+if($cpuTimePercent -gt '90') {
+  $PropertyBag.AddValue("State","OverUpperThreshold")
+  $PropertyBag.AddValue("cpupercentage",$cpuTimePercent)
+  $PropertyBag.AddValue("TopCpuName",$Top1ProcessName )
+  $PropertyBag.AddValue("IsOsProcesss", $Is_OS_Process)
+  $PropertyBag.AddValue("Top_Cpu_Value_Percentage", $Top1ProcessPercetage)
+}
+elseif($cpuTimePercent -gt '80') {
+  $PropertyBag.AddValue("State","OverMiddleThreshold")
+  $PropertyBag.AddValue("cpupercentage",$cpuTimePercent)
+  $PropertyBag.AddValue("TopCpuName",$Top1ProcessName )
+  $PropertyBag.AddValue("IsOsProcesss", $Is_OS_Process)
+  $PropertyBag.AddValue("Top_Cpu_Value_Percentage", $Top1ProcessPercetage)
+}
+else
+
+{
+  $PropertyBag.AddValue("State","UnderThreshold")
+
+}
+
+$api.return($PropertyBag) | out-file "C:\windows\temp\\CPUOutput.txt"
+$PropertyBag
+
+#$api.return($PropertyBag) 
+
+ 
+</ScriptBody>
+          <Arguments />
+          <TimeoutSeconds>60</TimeoutSeconds>
+          <UnhealthyExpression>
+            <SimpleExpression>
+              <ValueExpression>
+                <XPathQuery>Property[@Name='State']</XPathQuery>
+              </ValueExpression>
+              <Operator>Equal</Operator>
+              <ValueExpression>
+                <Value Type="String">OverUpperThreshold</Value>
+              </ValueExpression>
+            </SimpleExpression>
+          </UnhealthyExpression>
+          <WarningExpression>
+            <SimpleExpression>
+              <ValueExpression>
+                <XPathQuery>Property[@Name='State']</XPathQuery>
+              </ValueExpression>
+              <Operator>Equal</Operator>
+              <ValueExpression>
+                <Value Type="String">OverMiddleThreshold</Value>
+              </ValueExpression>
+            </SimpleExpression>
+          </WarningExpression>
+          <HealthyExpression>
+            <SimpleExpression>
+              <ValueExpression>
+                <XPathQuery>Property[@Name='State']</XPathQuery>
+              </ValueExpression>
+              <Operator>Equal</Operator>
+              <ValueExpression>
+                <Value Type="String">UnderThreshold</Value>
+              </ValueExpression>
+            </SimpleExpression>
+          </HealthyExpression>
+        </Configuration>
+      </UnitMonitor>
+    </Monitors>
+  </Monitoring>
+  <Presentation>
+    <Folders>
+      <Folder ID="Folder_0e9b86b800ba450ebd08aecb52ee00db" Accessibility="Public" ParentFolder="SystemCenter!Microsoft.SystemCenter.Monitoring.ViewFolder.Root" />
+    </Folders>
+    <StringResources>
+      <StringResource ID="UIGeneratedMonitor838991326fb9470cad0acfdadabfba87_AlertMessageResourceID" />
+    </StringResources>
+  </Presentation>
+  <LanguagePacks>
+    <LanguagePack ID="ENU" IsDefault="false">
+      <DisplayStrings>
+        <DisplayString ElementID="Custom.CPU.Monitor">
+          <Name>Custom CPU Monitor</Name>
+        </DisplayString>
+        <DisplayString ElementID="Folder_0e9b86b800ba450ebd08aecb52ee00db">
+          <Name>Custom CPU Monitor</Name>
+        </DisplayString>
+        <DisplayString ElementID="UIGeneratedMonitor838991326fb9470cad0acfdadabfba87">
+          <Name>Custom CPU Monitor</Name>
+          <Description />
+        </DisplayString>
+        <DisplayString ElementID="UIGeneratedMonitor838991326fb9470cad0acfdadabfba87" SubElementID="UIGeneratedOpStateId17d37897803b47789341f6bf0b4326d7">
+          <Name>Healthy</Name>
+        </DisplayString>
+        <DisplayString ElementID="UIGeneratedMonitor838991326fb9470cad0acfdadabfba87" SubElementID="UIGeneratedOpStateIdee89c6faa36a41848634518edde19fba">
+          <Name>Unhealthy</Name>
+        </DisplayString>
+        <DisplayString ElementID="UIGeneratedMonitor838991326fb9470cad0acfdadabfba87" SubElementID="UIGeneratedOpStateId74d43dd025b84e0c85a2cb6892c3f40d">
+          <Name>Warning</Name>
+        </DisplayString>
+        <DisplayString ElementID="UIGeneratedMonitor838991326fb9470cad0acfdadabfba87_AlertMessageResourceID">
+          <Name>Custom CPU Monitor - The CPU usage has exceed the threshold</Name>
+          <Description>Please see the alert context for details.
+
+Server name: {0}
+
+
+
+Current CPU usage: {1}
+
+Which process consume the most CPU : {2}  {3}</Description>
+        </DisplayString>
+      </DisplayStrings>
+    </LanguagePack>
+  </LanguagePacks>
+</ManagementPack>
